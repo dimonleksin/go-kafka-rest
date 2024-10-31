@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/dimonleksin/go-kafka-rest/pkg/kafka"
+	"github.com/dimonleksin/go-kafka-rest/pkg/kafka/kfk_reader"
 	"github.com/dimonleksin/go-kafka-rest/pkg/server/groups"
 )
 
@@ -36,7 +36,7 @@ func (s *Server) Instance(write http.ResponseWriter, read *http.Request) {
 			return
 		}
 		if len(s.Stream) == 0 {
-			s.Stream = make(map[string]*kafka.Kafka)
+			s.Stream = make(map[string]kfk_reader.Kafka)
 		}
 		serv, err := g.CreateConsumer()
 		if err != nil {
@@ -48,7 +48,7 @@ func (s *Server) Instance(write http.ResponseWriter, read *http.Request) {
 		s.Stream[g.ClientId] = serv
 		write.Write([]byte(fmt.Sprintf("topic: %s, group: %s", g.Topic, g.ClientId)))
 	} else if read.Method == "DELETE" {
-		if err := s.Stream[g.ClientId].Consumer.Close(); err != nil {
+		if err := s.Stream[g.ClientId].CloseConsumer(); err != nil {
 			write.WriteHeader(http.StatusInternalServerError)
 			resp := fmt.Sprintf("error closing consumer: %v", err)
 			write.Write([]byte(resp))

@@ -1,4 +1,4 @@
-package kafka
+package kfk_reader
 
 import (
 	"context"
@@ -8,56 +8,73 @@ import (
 	"github.com/IBM/sarama"
 )
 
-type KafkaWithTimeout struct {
+// struct for create consumer with counter
+type KafkaWithCounter struct {
 	Topic    string // Name of topic
 	Timeout  time.Duration
 	Consumer sarama.ConsumerGroup
 	Counter  int          // Number of message to read
 	Data     chan Message // chan for send msg to main gorutine. When chanel close, we need send responce to client
+	// Ctx      context.Context
 }
 
-func (kfk *KafkaWithTimeout) ReadDataFromTopic() {
+type Message struct {
+	Value  string `json:"value"`
+	Offset int    `json:"offset"`
+	Finaly bool   `json:"finaly"`
+}
+
+func (kfk *KafkaWithCounter) DataChan() chan Message {
+	return kfk.Data
+}
+
+func (kfk *KafkaWithCounter) CreateChan(chan Message) {
+	kfk.Data = make(chan Message, 20)
+}
+
+func (kfk *KafkaWithCounter) CloseConsumer() error {
+	err := kfk.Consumer.Close()
+	return err
+}
+
+func (kfk *KafkaWithCounter) ReadDataFromTopic() {
 	var topics []string
 	topics = append(topics, kfk.Topic)
-	consumer := ConsumerWithTimeout{
+	consumer := Consumer{
 		kfk:   kfk,
 		ready: make(chan bool),
 	}
-	consumer.ready = make(chan bool)
-	<-consumer.ready
-	log.Println("consumer ready")
-	log.Printf("start reading from %v", topics)
-	// Create context for stoping read when no new message
 	ctx, _ := context.WithTimeout(context.Background(), kfk.Timeout)
+	log.Printf("start reading from %v", topics)
 	err := kfk.Consumer.Consume(ctx, topics, &consumer)
 	if err != nil {
 		log.Printf("err: %v", err)
 	}
-	// close(kfk.Data)
 }
 
 // Consumer represents a Sarama consumer group consumer
-type ConsumerWithTimeout struct {
+type Consumer struct {
 	ready chan bool
-	kfk   *KafkaWithTimeout
+	kfk   *KafkaWithCounter
 }
 
 // Setup is run at the beginning of a new session, before ConsumeClaim
-func (consumer ConsumerWithTimeout) Setup(sarama.ConsumerGroupSession) error {
+func (consumer Consumer) Setup(sarama.ConsumerGroupSession) error {
+	log.Println("creating consumer")
 	// Mark the consumer as ready
 	close(consumer.ready)
 	return nil
 }
 
 // Cleanup is run at the end of a session, once all ConsumeClaim goroutines have exited
-func (consumer ConsumerWithTimeout) Cleanup(sarama.ConsumerGroupSession) error {
+func (consumer Consumer) Cleanup(sarama.ConsumerGroupSession) error {
 	return nil
 }
 
 // ConsumeClaim must start a consumer loop of ConsumerGroupClaim's Messages().
 // Once the Messages() channel is closed, the Handler must finish its processing
 // loop and exit.
-func (consumer ConsumerWithTimeout) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+func (consumer Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	log.Printf("start consuming with counter %d", consumer.kfk.Counter)
 	for i := 0; i < consumer.kfk.Counter; i++ {
 		select {
@@ -71,12 +88,8 @@ func (consumer ConsumerWithTimeout) ConsumeClaim(session sarama.ConsumerGroupSes
 				Value:  string(message.Value),
 				Offset: int(message.Offset),
 			}
-			// log.Printf("Message claimed: value = %s", string(message.Value))
 			session.MarkMessage(message, "")
 
-		// Should return when `session.Context()` is done.
-		// If not, will raise `ErrRebalanceInProgress` or `read tcp <ip>:<port>: i/o timeout` when kafka rebalance. see:
-		// https://github.com/IBM/sarama/issues/1192
 		case <-session.Context().Done():
 			log.Println("timeout consuming")
 			consumer.kfk.Data <- Message{Finaly: true}

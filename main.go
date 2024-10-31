@@ -15,9 +15,11 @@ func main() {
 	if err != nil {
 		log.Panicf("failed to start server, err: %v", err)
 	}
+
 	server := &server.Server{
 		Settings: s,
 	}
+	server.StartProduccer()
 	http.HandleFunc("/topics/", server.Topics)
 	http.HandleFunc("/groups/", server.Instance)
 	log.Println("server started in :8080")
